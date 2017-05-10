@@ -6,6 +6,7 @@
   []
   (f/start-figwheel! {:builds [{:id :dev
                                 :source-paths ["src"]
+                                :figwheel true
                                 :compiler {:main 'xom.ui
                                            :asset-path "js/compiled/out"
                                            :output-to "resources/public/js/compiled/xom.js"
@@ -14,3 +15,6 @@
                                            }
                                 }]}))
 
+(defn stop
+  []
+  (f/stop-figwheel!))

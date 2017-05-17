@@ -1,16 +1,33 @@
 (ns xom.ui
-  (:require ))
+  (:require [goog.dom :as gdom]
+            [om.next :as om :refer-macros [defui]]
+            [om.dom :as dom]))
 
 (enable-console-print!)
 
-(println "This text is printed from src/xom/core.cljs. Go ahead and edit it and see reloading in action.")
+(defmulti read (fn [env key params] key))
 
-;; define your app data so that it doesn't get over-written on reload
+(defmethod read :default
+  [{:keys [state] :as env} key params]
+  (let [st @state]
+    (if-let [[_ value] (find st key)]
+      {:value value}
+      {:value :not-found})))
 
-(defonce app-state (atom {:text "Hello world!"}))
+(defui HelloWorld
+  static om/IQuery
+  (query [this]
+    '[:message])
+  Object
+  (render [this]
+    (let [{:keys [message]} (om/props this)]
+      (dom/div nil
+        (dom/h2 nil message)))))
 
-(defn on-js-reload []
-  ;; optionally touch your app-state to force rerendering depending on
-  ;; your application
-  ;; (swap! app-state update-in [:__figwheel_counter] inc)
-)
+(defonce reconciler
+  (om/reconciler
+    {:state (atom {:message "hello world"})
+     :parser (om/parser {:read read})}))
+
+(om/add-root! reconciler
+  HelloWorld (gdom/getElement "app"))

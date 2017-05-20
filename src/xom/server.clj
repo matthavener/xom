@@ -9,9 +9,24 @@
     )
   )
 
+(defn log [& m] (spit "server.log" (apply str m "\n") :append true))
+
+(defmulti event-msg-handler :id)
+
+(defmethod event-msg-handler :xom/query
+  [{:keys [?reply-fn] :as e}]
+  (log "got " e)
+  (?reply-fn {:message "hello world"}))
+
+(defmethod event-msg-handler :default
+  [e]
+  (log "handle-ws :default"(select-keys e [:id :event])))
+
 (let [{:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
-       (sente/make-channel-socket! (get-sch-adapter) {})]
+       (sente/make-channel-socket!
+         (get-sch-adapter)
+         {:user-id-fn (fn [_] (str (java.util.UUID/randomUUID)))})]
 
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
@@ -19,6 +34,8 @@
   (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
   (def connected-uids                connected-uids) ; Watchable, read-only atom)
 )
+
+(sente/start-server-chsk-router! ch-chsk event-msg-handler)
 
 (defn render-index []
   {:status 200

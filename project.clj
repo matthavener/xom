@@ -8,8 +8,6 @@
 
   :dependencies [[org.clojure/clojure "1.8.0"]
                  [org.clojure/clojurescript "1.9.229"]
-                 [org.clojure/core.async  "0.3.442"
-                  :exclusions  [org.clojure/tools.reader]]
                  [cljsjs/react "15.4.2-1"]
                  [cljsjs/react-dom "15.4.2-1"]
                  [aleph "0.4.3"]
@@ -18,8 +16,6 @@
                  [com.datomic/datomic-free "0.9.5561"]
                  [org.omcljs/om "1.0.0-alpha48"]
                  [ring "1.5.0"]
-                 [com.cognitect/transit-clj "0.8.300"]
-                 [com.cognitect/transit-cljs "0.8.239"]
                  [figwheel-sidecar "0.5.8"]]
 
   :source-paths ["src"]

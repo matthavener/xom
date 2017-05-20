@@ -60,6 +60,8 @@
                            (cb r ))))
      }))
 
+; wait until websocket is established before mounting root, otherwise we have to buffer
+; queries or re-run them
 (defmethod handle-ws :chsk/handshake
   [e]
   (println "Adding root")

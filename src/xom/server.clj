@@ -42,17 +42,15 @@
    :headers {"Content-Type" "text/html"}
    :body "<html><body><div id=\"app\">Loading...</div>
          <script src=\"/js/compiled/xom.js\"></script></body></html>"
-   }
-  )
+   })
+
 (defroutes my-app-routes
-  (GET "/" req (render-index) )
+  (GET "/" req (render-index))
   (GET  "/chsk" req (ring-ajax-get-or-ws-handshake req))
-  (POST "/chsk" req (ring-ajax-post                req))
-  )
+  (POST "/chsk" req (ring-ajax-post req)))
 
 (def my-app
   (-> my-app-routes
-      ;; Add necessary Ring middleware:
       ring.middleware.keyword-params/wrap-keyword-params
       ring.middleware.params/wrap-params
       (ring.middleware.resource/wrap-resource "public")))

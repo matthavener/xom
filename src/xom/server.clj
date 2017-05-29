@@ -12,7 +12,11 @@
 
 (defn log [& m] (spit "server.log" (apply str m "\n") :append true))
 
-(def schema [{:db/ident :xom/positions
+(def schema [{:db/ident :xom/game-id
+              :db/valueType :db.type/uuid
+              :db/cardinality :db.cardinality/one
+              :db/unique :db.unique/identity}
+             {:db/ident :xom/positions
               :db/valueType :db.type/ref
               :db/cardinality :db.cardinality/many} ; coll-of :pos/{row,col,mark}
              {:db/ident :xom/player-x
@@ -31,6 +35,87 @@
               :db/valueType :db.type/keyword
               :db/cardinality :db.cardinality/one} ; :x or :y
              ])
+
+(defn create-game
+  "Create a new game"
+  [player-x player-y]
+  {:xom/game-id (java.util.UUID/randomUUID)
+   :xom/player-x player-x
+   :xom/player-y player-y
+   :xom/positions []})
+
+(defn player-turn
+  "Return whose turn it is (x goes first)."
+  [game]
+  (let [turns (count (:xom/positions game))]
+    (if (even? turns)
+      :x
+      :y)))
+
+(defn board
+  "Return a 2d vector representing the board"
+  [game]
+  (reduce (fn [b {:keys [pos/row pos/col pos/mark]}]
+            (assoc-in b [row col] mark)) [[nil nil nil] [nil nil nil] [nil nil nil]] (:xom/positions game)))
+
+(defn winner
+  "Return the winner for the given board Returns :none, :cat, :x or :y"
+  [board]
+  (let [check-win (fn [[p1 p2 p3]]
+                    (if (= (get-in board p1) (get-in board p2) (get-in board p3))
+                      (get-in board p1)))]
+    (or
+     (some check-win [[[0 0] [0 1] [0 2]] ; top
+                      [[1 0] [1 1] [1 2]] ; middle
+                      [[2 0] [2 1] [2 2]] ; bottom
+                      [[0 0] [1 0] [2 0]] ; left
+                      [[0 1] [1 1] [2 1]] ; center
+                      [[0 2] [1 2] [2 2]] ; right
+                      [[0 0] [1 1] [2 2]] ; diag
+                      [[2 0] [1 1] [0 2]] ; diag
+                      ])
+     (if (= 9 (->> board flatten (remove nil?) count))
+       :cat)
+     :none)))
+
+(defn valid-move?
+  [game {:keys [pos/row pos/col pos/mark]}]
+  (and game
+       (= mark (player-turn game))
+       (< row 3)
+       (< col 3)
+       (empty? (filter #(and (= row (:pos/row %))
+                             (= col (:pos/col %))) (:xom/positions game)))))
+
+(defn game
+  "return the game entity for the game id or nil if the game does not exist"
+  [db id]
+  (d/entity db [:xom/game-id id]))
+
+(defn move
+  "Return a transaction to apply this move or nil if the move is invalid"
+  [db [game-id row col mark]]
+  (let [g (game db game-id)
+        m {:pos/row row :pos/col col :pos/mark mark}]
+    (if (valid-move? g m)
+      [{:xom/game-id game-id
+        :xom/positions [m]}])))
+
+(comment
+ (even? 0)
+
+ (player-turn (create-game "x" "y"))
+
+ (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :y})
+ (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :x})
+ (valid-move? (create-game "x" "y") {:pos/row 4 :pos/col 3 :pos/mark :x})
+
+ (winner [[:x :x :y] [:y :x :x] [:x :y :y]])
+ (winner [[:x :x :x]  [:x :x :y]  [:y :y :y]] )
+
+ (winner (board {:xom/positions [{:pos/row 0 :pos/col 0 :pos/mark :x}]}))
+(->> (board {:xom/positions [{:pos/row 0 :pos/col 0 :pos/mark :x}]}) flatten (remove nil?) count)
+ )
 
 (defn conn [] (d/connect "datomic:mem://xom"))
 

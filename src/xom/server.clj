@@ -6,21 +6,37 @@
     [ring.middleware.resource]
     [ring.middleware.keyword-params]
     [ring.middleware.params]
+    [datomic.api :as d]
     )
   )
 
 (defn log [& m] (spit "server.log" (apply str m "\n") :append true))
 
+(def schema [{:db/ident :xom/positions
+              :db/valueType :db.type/ref
+              :db/cardinality :db.cardinality/many} ; coll-of :pos/{row,col,mark}
+             {:db/ident :xom/player-x
+              :db/valueType :db.type/uuid
+              :db/cardinality :db.cardinality/one}
+             {:db/ident :xom/player-y
+              :db/valueType :db.type/uuid
+              :db/cardinality :db.cardinality/one}
+             {:db/ident :pos/row
+              :db/valueType :db.type/long
+              :db/cardinality :db.cardinality/one}
+             {:db/ident :pos/col
+              :db/valueType :db.type/long
+              :db/cardinality :db.cardinality/one}
+             {:db/ident :pos/mark
+              :db/valueType :db.type/keyword
+              :db/cardinality :db.cardinality/one} ; :x or :y
+             ])
+
+(defn conn [] (d/connect "datomic:mem://xom"))
+
+(comment (d/q '[:find ?e :where [?e :db/type ]] (d/db (conn))))
+
 (defmulti event-msg-handler :id)
-
-(defmethod event-msg-handler :xom/query
-  [{:keys [?reply-fn] :as e}]
-  (log "got " e)
-  (?reply-fn {:message "hello world"}))
-
-(defmethod event-msg-handler :default
-  [e]
-  (log "handle-ws :default"(select-keys e [:id :event])))
 
 (let [{:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
@@ -34,6 +50,40 @@
   (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
   (def connected-uids                connected-uids) ; Watchable, read-only atom)
 )
+
+(remove-all-methods event-msg-handler)
+
+(defn broadcast-players [e]
+  (log "notifying " @connected-uids)
+  (doseq [uid (:ws @connected-uids)]
+    (chsk-send! uid [:xom/data {:xom/connected-users (into [] (:ws @connected-uids))}])
+    )
+  )
+
+(defmethod event-msg-handler :chsk/uidport-open
+  [e]
+  (broadcast-players e))
+
+(defmethod event-msg-handler :chsk/uidport-close
+  [e]
+  (broadcast-players e))
+
+(defmethod event-msg-handler :xom/game
+  [{:keys [?reply-fn] :as e}]
+  (log "got " (keys e))
+  (?reply-fn {:message "hello world"}))
+
+(defmethod event-msg-handler 'xom/new-game
+  [{:keys [?reply-fn] :as e}]
+  (log "got " (keys e))
+  (?reply-fn {:xom/game []}))
+
+(defmethod event-msg-handler :default
+  [{:keys [?reply-fn] :as e}]
+  (when ?reply-fn
+    (?reply-fn {}))
+  (log "handle-ws :default" (select-keys e [:id :event])))
+
 
 (sente/start-server-chsk-router! ch-chsk event-msg-handler)
 

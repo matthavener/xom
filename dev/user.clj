@@ -3,6 +3,7 @@
    [figwheel-sidecar.repl-api :as f]
    [aleph.http :as http]
    [xom.server :as server]
+   [datomic.api :as d]
    ))
 
 (def server (atom nil))
@@ -20,13 +21,16 @@
                                 }]})
   (reset! server (http/start-server server/my-app
                      {:port 3000}))
+  (when (d/create-database "datomic:mem://xom")
+    (d/transact (xom.server/conn) xom.server/schema))
   )
 
 (defn stop
   []
   (f/stop-figwheel!)
   (.close @server)
-  (reset! server nil))
+  (reset! server nil)
+  (d/delete-database "datomic:mem//xom"))
 
 (comment
   (start)

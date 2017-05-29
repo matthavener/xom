@@ -7,15 +7,18 @@
 
 (enable-console-print!)
 
-(defui HelloWorld
+(defui ^:once HelloWorld
   static om/IQuery
   (query [this]
-    '[:message])
+    '[:xom/connected-users :xom/game])
   Object
   (render [this]
-    (let [{:keys [message]} (om/props this)]
+    (let [{:xom/keys [connected-users]} (om/props this)]
       (dom/div nil
-        (dom/h2 nil message)))))
+        (if (not= 2 (count connected-users))
+          (dom/div nil "waiting for other player")
+          (dom/div #js {:onClick (fn [e] (om/transact! this [(list 'xom/new-game)]))}
+                   "click me to start game"))))))
 
 (defmulti read (fn [env key params] key))
 
@@ -26,12 +29,14 @@
       {:value value}
       {:remote true})))
 
-(defmulti handle-ws :id)
+(defmulti mutate (fn [env key params] key))
 
-(defmethod handle-ws :default
-  [e]
-  (println (select-keys e [:id :event]))
-  )
+(defmethod mutate :default
+  [{:keys [state] :as env} key params]
+  (let [st @state]
+    {:remote true}))
+
+(defmulti handle-ws :id)
 
 (defonce setup-ws
   (do
@@ -50,15 +55,14 @@
 (defonce reconciler
   (om/reconciler
     {:state (atom {} #_{:message "hello world"})
-     :parser (om/parser {:read read})
+     :parser (om/parser {:read read :mutate mutate})
      :send (fn [query cb]
              (println "sending " query)
              (chsk-send! [:xom/query query]
                          5000
                          (fn [r]
-                           (println "received " r)
-                           (cb r ))))
-     }))
+                           (println "received reply " r)
+                           (cb r ))))}))
 
 ; wait until websocket is established before mounting root, otherwise we have to buffer
 ; queries or re-run them
@@ -67,3 +71,18 @@
   (println "Adding root")
   (om/add-root! reconciler
                   HelloWorld (gdom/getElement "app")))
+
+(when (:open? @chsk-state)
+  (om/add-root! reconciler
+                HelloWorld (gdom/getElement "app"))) 
+
+(defmethod handle-ws :chsk/recv
+  [{:keys [event] :as e}]
+  (println "received async " event)
+  (om/merge! reconciler (second (second event))))
+
+(defmethod handle-ws :default
+  [e]
+  (println (select-keys e [:id :event]))
+  )
+

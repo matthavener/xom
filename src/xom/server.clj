@@ -82,6 +82,8 @@
   [game {:keys [pos/row pos/col pos/mark]}]
   (and game
        (= mark (player-turn game))
+       (< row 3)
+       (< col 3)
        (empty? (filter #(and (= row (:pos/row %))
                              (= col (:pos/col %))) (:xom/positions game)))))
 
@@ -106,6 +108,7 @@
 
  (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :y})
  (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :x})
+ (valid-move? (create-game "x" "y") {:pos/row 4 :pos/col 3 :pos/mark :x})
 
  (winner [[:x :x :y] [:y :x :x] [:x :y :y]])
  (winner [[:x :x :x]  [:x :x :y]  [:y :y :y]] )

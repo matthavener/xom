@@ -56,9 +56,9 @@
   (om/reconciler
     {:state (atom {} #_{:message "hello world"})
      :parser (om/parser {:read read :mutate mutate})
-     :send (fn [query cb]
-             (println "sending " query)
-             (chsk-send! [:xom/query query]
+     :send (fn [{:keys [remote]} cb]
+             (println "sending " remote)
+             (chsk-send! [:xom/query remote]
                          5000
                          (fn [r]
                            (println "received reply " r)

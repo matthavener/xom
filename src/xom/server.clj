@@ -7,6 +7,7 @@
     [ring.middleware.keyword-params]
     [ring.middleware.params]
     [datomic.api :as d]
+    [om.next.server :as om]
     )
   )
 
@@ -18,12 +19,16 @@
               :db/unique :db.unique/identity}
              {:db/ident :xom/positions
               :db/valueType :db.type/ref
+              :db/isComponent true
               :db/cardinality :db.cardinality/many} ; coll-of :pos/{row,col,mark}
              {:db/ident :xom/player-x
               :db/valueType :db.type/uuid
               :db/cardinality :db.cardinality/one}
              {:db/ident :xom/player-o
               :db/valueType :db.type/uuid
+              :db/cardinality :db.cardinality/one}
+             {:db/ident :pos/index
+              :db/valueType :db.type/int
               :db/cardinality :db.cardinality/one}
              {:db/ident :pos/row
               :db/valueType :db.type/long
@@ -96,7 +101,7 @@
   "Return a transaction to apply this move or nil if the move is invalid"
   [db [game-id row col mark]]
   (let [g (game db game-id)
-        m {:pos/row row :pos/col col :pos/mark mark}]
+        m {:pos/index (count (:xom/positions g)) :pos/row row :pos/col col :pos/mark mark}]
     (if (valid-move? g m)
       [{:xom/game-id game-id
         :xom/positions [m]}])))
@@ -117,7 +122,20 @@
 (->> (board {:xom/positions [{:pos/row 0 :pos/col 0 :pos/mark :x}]}) flatten (remove nil?) count)
  )
 
+(defmulti om-read om/dispatch)
+(defmulti om-mutate om/dispatch)
+
+(defmethod om-read :default
+  [e k p]
+  (log "default read: " k (keys e) p))
+
+(defmethod om-mutate :default
+  [e k p]
+  (log "default mutate: " k (keys e) p))
+
+(def om-parser (om/parser {:read om-read :mutate om-mutate}))
 (defn conn [] (d/connect "datomic:mem://xom"))
+(def db-conn (atom nil))
 
 (comment (d/q '[:find ?e :where [?e :db/type ]] (d/db (conn))))
 
@@ -163,6 +181,13 @@
   (log "got " (keys e))
   (?reply-fn {:xom/game []}))
 
+(defmethod event-msg-handler :xom/query
+  [{:keys [?reply-fn ?data ring-req] :as e}]
+  (log "'xom/query got: " (keys e) ?data)
+  (?reply-fn (om-parser (merge (select-keys e [:uid :connected-uids :send-fn])
+                               (select-keys ring-req [:conn])) ?data))
+  )
+
 (defmethod event-msg-handler :default
   [{:keys [?reply-fn] :as e}]
   (when ?reply-fn
@@ -184,8 +209,14 @@
   (GET  "/chsk" req (ring-ajax-get-or-ws-handshake req))
   (POST "/chsk" req (ring-ajax-post req)))
 
+(defn wrap-datomic
+  [handler]
+  (fn [request]
+    (handler (assoc request :conn @db-conn))))
+
 (def my-app
   (-> my-app-routes
       ring.middleware.keyword-params/wrap-keyword-params
       ring.middleware.params/wrap-params
+      wrap-datomic
       (ring.middleware.resource/wrap-resource "public")))

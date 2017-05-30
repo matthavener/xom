@@ -22,7 +22,7 @@
              {:db/ident :xom/player-x
               :db/valueType :db.type/uuid
               :db/cardinality :db.cardinality/one}
-             {:db/ident :xom/player-y
+             {:db/ident :xom/player-o
               :db/valueType :db.type/uuid
               :db/cardinality :db.cardinality/one}
              {:db/ident :pos/row
@@ -33,15 +33,15 @@
               :db/cardinality :db.cardinality/one}
              {:db/ident :pos/mark
               :db/valueType :db.type/keyword
-              :db/cardinality :db.cardinality/one} ; :x or :y
+              :db/cardinality :db.cardinality/one} ; :x or :o
              ])
 
 (defn create-game
   "Create a new game"
-  [player-x player-y]
+  [player-x player-o]
   {:xom/game-id (java.util.UUID/randomUUID)
    :xom/player-x player-x
-   :xom/player-y player-y
+   :xom/player-o player-o
    :xom/positions []})
 
 (defn player-turn
@@ -50,7 +50,7 @@
   (let [turns (count (:xom/positions game))]
     (if (even? turns)
       :x
-      :y)))
+      :o)))
 
 (defn board
   "Return a 2d vector representing the board"
@@ -59,7 +59,7 @@
             (assoc-in b [row col] mark)) [[nil nil nil] [nil nil nil] [nil nil nil]] (:xom/positions game)))
 
 (defn winner
-  "Return the winner for the given board Returns :none, :cat, :x or :y"
+  "Return the winner for the given board Returns :none, :cat, :x or :o"
   [board]
   (let [check-win (fn [[p1 p2 p3]]
                     (if (= (get-in board p1) (get-in board p2) (get-in board p3))
@@ -104,14 +104,14 @@
 (comment
  (even? 0)
 
- (player-turn (create-game "x" "y"))
+ (player-turn (create-game "x" "o"))
 
- (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :y})
- (valid-move? (create-game "x" "y") {:pos/row 0 :pos/col 0 :pos/mark :x})
- (valid-move? (create-game "x" "y") {:pos/row 4 :pos/col 3 :pos/mark :x})
+ (valid-move? (create-game "x" "o") {:pos/row 0 :pos/col 0 :pos/mark :o})
+ (valid-move? (create-game "x" "o") {:pos/row 0 :pos/col 0 :pos/mark :x})
+ (valid-move? (create-game "x" "o") {:pos/row 4 :pos/col 3 :pos/mark :x})
 
- (winner [[:x :x :y] [:y :x :x] [:x :y :y]])
- (winner [[:x :x :x]  [:x :x :y]  [:y :y :y]] )
+ (winner [[:x :x :o] [:o :x :x] [:x :o :o]])
+ (winner [[:x :x :x]  [:x :x :o]  [:o :o :o]] )
 
  (winner (board {:xom/positions [{:pos/row 0 :pos/col 0 :pos/mark :x}]}))
 (->> (board {:xom/positions [{:pos/row 0 :pos/col 0 :pos/mark :x}]}) flatten (remove nil?) count)

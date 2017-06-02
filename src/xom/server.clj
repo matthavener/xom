@@ -17,19 +17,13 @@
               :db/valueType :db.type/uuid
               :db/cardinality :db.cardinality/one
               :db/unique :db.unique/identity}
+             {:db/ident :xom/winner
+              :db/valueType :db.type/keyword
+              :db/cardinality :db.cardinality/one}
              {:db/ident :xom/positions
               :db/valueType :db.type/ref
               :db/isComponent true
               :db/cardinality :db.cardinality/many} ; coll-of :pos/{row,col,mark}
-             {:db/ident :xom/player-x
-              :db/valueType :db.type/uuid
-              :db/cardinality :db.cardinality/one}
-             {:db/ident :xom/player-o
-              :db/valueType :db.type/uuid
-              :db/cardinality :db.cardinality/one}
-             {:db/ident :pos/index
-              :db/valueType :db.type/int
-              :db/cardinality :db.cardinality/one}
              {:db/ident :pos/row
               :db/valueType :db.type/long
               :db/cardinality :db.cardinality/one}
@@ -43,10 +37,9 @@
 
 (defn create-game
   "Create a new game"
-  [player-x player-o]
+  []
   {:xom/game-id (java.util.UUID/randomUUID)
-   :xom/player-x player-x
-   :xom/player-o player-o
+   :xom/winner :none
    :xom/positions []})
 
 (defn player-turn
@@ -101,7 +94,7 @@
   "Return a transaction to apply this move or nil if the move is invalid"
   [db [game-id row col mark]]
   (let [g (game db game-id)
-        m {:pos/index (count (:xom/positions g)) :pos/row row :pos/col col :pos/mark mark}]
+        m {:pos/row row :pos/col col :pos/mark mark}]
     (if (valid-move? g m)
       [{:xom/game-id game-id
         :xom/positions [m]}])))
@@ -129,23 +122,52 @@
   [e k p]
   (log "default read: " k (keys e) p))
 
+(defmethod om-read :xom/my-uid
+  [{:keys [uid] :as e} k p]
+  {:value uid}
+  )
+
+(comment
+  (d/transact (conn) [(create-game)] )
+  )
+(defmethod om-read :xom/game
+  [{:keys [conn]} k p]
+  (let [game (d/q '[:find (pull ?e [:xom/game-id
+                                    :xom/winner
+                                    {:xom/positions [:pos/row :pos/col :pos/mark]}]) .
+                     :where
+                     [?e :xom/game-id]
+                     [?e :xom/winner :none]] (d/db conn))]
+    (log "got game" game)
+    {:value game}))
+
 (defmethod om-mutate :default
   [e k p]
   (log "default mutate: " k (keys e) p))
 
 (def om-parser (om/parser {:read om-read :mutate om-mutate}))
 (defn conn [] (d/connect "datomic:mem://xom"))
-(def db-conn (atom nil))
 
 (comment (d/q '[:find ?e :where [?e :db/type ]] (d/db (conn))))
 
 (defmulti event-msg-handler :id)
 
+(declare connected-uids)
+(comment (deref connected-uids))
 (let [{:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
        (sente/make-channel-socket!
          (get-sch-adapter)
-         {:user-id-fn (fn [_] (str (java.util.UUID/randomUUID)))})]
+         {:user-id-fn (fn [_]
+                        (let [uids (:ws @connected-uids)]
+                          (log "user-id-fn " (count uids) uids)
+                          (cond
+                            (empty? uids)
+                            "x"
+                            (= (count uids) 1)
+                            "y"
+                            :else
+                            nil)))})]
 
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
@@ -156,37 +178,14 @@
 
 (remove-all-methods event-msg-handler)
 
-(defn broadcast-players [e]
-  (log "notifying " @connected-uids)
-  (doseq [uid (:ws @connected-uids)]
-    (chsk-send! uid [:xom/data {:xom/connected-users (into [] (:ws @connected-uids))}])
-    )
-  )
-
-(defmethod event-msg-handler :chsk/uidport-open
-  [e]
-  (broadcast-players e))
-
-(defmethod event-msg-handler :chsk/uidport-close
-  [e]
-  (broadcast-players e))
-
-(defmethod event-msg-handler :xom/game
-  [{:keys [?reply-fn] :as e}]
-  (log "got " (keys e))
-  (?reply-fn {:message "hello world"}))
-
-(defmethod event-msg-handler 'xom/new-game
-  [{:keys [?reply-fn] :as e}]
-  (log "got " (keys e))
-  (?reply-fn {:xom/game []}))
-
 (defmethod event-msg-handler :xom/query
   [{:keys [?reply-fn ?data ring-req] :as e}]
   (log "'xom/query got: " (keys e) ?data)
-  (?reply-fn (om-parser (merge (select-keys e [:uid :connected-uids :send-fn])
+  (try
+    (?reply-fn (om-parser (merge (select-keys e [:uid :connected-uids :send-fn])
                                (select-keys ring-req [:conn])) ?data))
-  )
+    (catch Exception ex
+      (log ex))))
 
 (defmethod event-msg-handler :default
   [{:keys [?reply-fn] :as e}]
@@ -212,7 +211,7 @@
 (defn wrap-datomic
   [handler]
   (fn [request]
-    (handler (assoc request :conn @db-conn))))
+    (handler (assoc request :conn (conn)))))
 
 (def my-app
   (-> my-app-routes

@@ -3,22 +3,22 @@
     [taoensso.sente :as sente]
     [goog.dom :as gdom]
     [om.next :as om :refer-macros [defui]]
-    [om.dom :as dom]))
+    [om.dom :as dom]
+    [clojure.pprint :refer [pprint]]))
 
 (enable-console-print!)
 
 (defui ^:once HelloWorld
   static om/IQuery
   (query [this]
-    '[:xom/connected-users :xom/game])
+    '[:xom/my-uid :xom/game])
   Object
   (render [this]
-    (let [{:xom/keys [connected-users]} (om/props this)]
+    (let [{:xom/keys [my-uid game]} (om/props this)]
       (dom/div nil
-        (if (not= 2 (count connected-users))
-          (dom/div nil "waiting for other player")
-          (dom/div #js {:onClick (fn [e] (om/transact! this [(list 'xom/new-game)]))}
-                   "click me to start game"))))))
+               (dom/div nil (str "me: " my-uid))
+               (dom/pre nil (with-out-str (pprint game)))
+               ))))
 
 (defmulti read (fn [env key params] key))
 

@@ -22,9 +22,7 @@
   (reset! server (http/start-server #'server/my-app
                      {:port 3000}))
   (when (d/create-database "datomic:mem://xom")
-    (d/transact (xom.server/conn) xom.server/schema))
-  (reset! xom.server/db-conn (xom.server/conn))
-  )
+    (d/transact (xom.server/conn) xom.server/schema)))
 
 (defn stop
   []

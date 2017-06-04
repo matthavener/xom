@@ -130,16 +130,26 @@
 (comment
   (d/transact (conn) [(create-game)] )
   )
+
 (defmethod om-read :xom/game
-  [{:keys [conn]} k p]
-  (let [game (d/q '[:find (pull ?e [:xom/game-id
-                                    :xom/winner
-                                    {:xom/positions [:pos/row :pos/col :pos/mark]}]) .
-                     :where
-                     [?e :xom/game-id]
-                     [?e :xom/winner :none]] (d/db conn))]
+  [{:keys [conn query]} k p]
+  (let [game (d/q '[:find (pull ?e query) .
+                    :in $ query
+                    :where
+                    [?e :xom/game-id]
+                    [?e :xom/winner :none]] (d/db conn) query)]
     (log "got game" game)
     {:value game}))
+
+(defmethod om-mutate 'xom/mark
+  [{:keys [conn uid]} k p]
+  (log "xom/mark " p uid)
+  {:action
+   (fn []
+     (try
+       (d/transact conn [(assoc p :pos/mark (keyword uid))])
+       (catch Exception e (log e))))}
+  )
 
 (defmethod om-mutate :default
   [e k p]
@@ -152,8 +162,6 @@
 
 (defmulti event-msg-handler :id)
 
-(declare connected-uids)
-(comment (deref connected-uids))
 (let [{:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
        (sente/make-channel-socket!
@@ -172,9 +180,11 @@
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
-  (def chsk-send!                    send-fn) ; ChannelSocket's send API fn
-  (def connected-uids                connected-uids) ; Watchable, read-only atom)
+  (def connected-uids                connected-uids)
 )
+(comment
+  (deref connected-uids)
+  )
 
 (remove-all-methods event-msg-handler)
 

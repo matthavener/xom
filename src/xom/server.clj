@@ -40,7 +40,9 @@
   []
   {:xom/game-id (java.util.UUID/randomUUID)
    :xom/winner :none
-   :xom/positions []})
+   :xom/positions (for [col (range 0 3)
+                        row (range 0 3)]
+                    {:pos/col col :pos/row row})})
 
 (defn player-turn
   "Return whose turn it is (x goes first)."
@@ -127,10 +129,6 @@
   {:value uid}
   )
 
-(comment
-  (d/transact (conn) [(create-game)] )
-  )
-
 (defmethod om-read :xom/game
   [{:keys [conn query]} k p]
   (let [game (d/q '[:find (pull ?e query) .
@@ -142,14 +140,16 @@
     {:value game}))
 
 (defmethod om-mutate 'xom/mark
-  [{:keys [conn uid]} k p]
+  [{:keys [conn uid send-fn connected-uids]} k p]
   (log "xom/mark " p uid)
   {:action
    (fn []
      (try
-       (d/transact conn [(assoc p :pos/mark (keyword uid))])
-       (catch Exception e (log e))))}
-  )
+       (let [{:keys [db-after]} @(d/transact conn [(assoc p :pos/mark (keyword uid))])]
+         (doseq [uid (:ws @connected-uids)]
+           (send-fn uid [:xom/data {[:db/id (:db/id p)]
+                                    (into {} (d/touch (d/entity db-after (:db/id p))))}])))
+       (catch Exception e (log e))))})
 
 (defmethod om-mutate :default
   [e k p]
@@ -172,7 +172,9 @@
                           (cond
                             (empty? uids)
                             "x"
-                            (= (count uids) 1)
+                            (uids "y")
+                            "x"
+                            (uids "x")
                             "y"
                             :else
                             nil)))})]

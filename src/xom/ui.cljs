@@ -8,46 +8,78 @@
 
 (enable-console-print!)
 
-(defn render-positions [this positions]
-  (let [indexed (group-by (juxt :pos/row :pos/col) positions)]
-    (dom/div nil
-      (mapv
-        (fn [row]
-          (dom/div
-            #js {:key row}
-            (mapv
-              (fn [col]
-                (let [pos (first (indexed [row col]))]
-                  (dom/span
-                    #js {:key col
-                         :onClick (fn [_] (om/transact! this [(list 'xom/mark pos)]))}
-                    (name (:pos/mark pos :e)))))
-              (range 0 3))))
-        (range 0 3)))))
+(defui ^:once Pos
+  static om/Ident
+  (ident [this {:db/keys [id]}]
+    [:db/id id])
+  static om/IQuery
+  (query [this]
+    [:db/id :pos/row :pos/col :pos/mark])
+  Object
+  (render
+    [this]
+    (let [{:pos/keys [mark] :as p} (om/props this)]
+      (println mark)
+      (dom/span
+        #js {:style #js {:fontSize "32pt"}
+             :onClick (fn [_]
+                        (om/transact! this [(list 'xom/mark p)]))}
+        (name (or mark :e))))))
 
-(defui ^:once HelloWorld
+(def pos-render (om/factory Pos {:keyfn :pos/col}))
+
+(defui ^:once Game
+  static om/Ident
+  (ident [this {:db/keys [id]}]
+    [:db/id id])
+  static om/IQuery
+  (query [this]
+    [:db/id
+     {:xom/positions (om/get-query Pos)}
+     :xom/winner])
+  Object
+  (render
+    [this]
+    (let [{:xom/keys [winner positions]} (om/props this)
+          indexed (group-by (juxt :pos/row :pos/col) positions)]
+      (dom/div nil
+               (mapv
+                 (fn [row]
+                   (dom/div
+                     #js {:key row}
+                     (mapv
+                       (fn [col]
+                         (let [pos (first (indexed [row col]))]
+                           (pos-render pos)))
+                       (range 0 3))))
+                 (range 0 3))))))
+
+(def game-render (om/factory Game))
+
+(defui ^:once Xom
   static om/IQuery
   (query [this]
     [:xom/my-uid
-     {:xom/game [:db/id
-                 {:xom/positions [:db/id :pos/row :pos/col :pos/mark]}
-                 :xom/winner]}])
+     {:xom/game (om/get-query Game)}])
   Object
   (render [this]
     (let [{:xom/keys [my-uid game]} (om/props this)]
       (dom/div nil
                (dom/div nil (str "me: " my-uid))
                (dom/pre nil (with-out-str (pprint game)))
-               (render-positions this (:xom/positions game))
+               (when game
+                 (game-render game))
                ))))
 
 (defmulti read (fn [env key params] key))
 
 (defmethod read :default
-  [{:keys [state] :as env} key params]
+  [{:keys [query state] :as env} key params]
   (let [st @state]
     (if-let [[_ value] (find st key)]
-      {:value value}
+      {:value (if (vector? value)
+                (om/db->tree query value st)
+                value)}
       {:remote true})))
 
 (defmulti mutate (fn [env key params] key))
@@ -65,7 +97,6 @@
           (sente/make-channel-socket! "/chsk"
                                       {:type :auto
                                        :packer :edn})]
-      (def chsk       chsk)
       (def ch-chsk    ch-recv)
       (def chsk-send! send-fn)
       (def chsk-state state))
@@ -75,8 +106,7 @@
 
 (defonce reconciler
   (om/reconciler
-    {:state (atom {} #_{:message "hello world"})
-     :parser (om/parser {:read read :mutate mutate})
+    {:parser (om/parser {:read read :mutate mutate})
      :send (fn [{:keys [remote]} cb]
              (println "sending " remote)
              (chsk-send! [:xom/query remote]
@@ -90,12 +120,11 @@
 (defmethod handle-ws :chsk/handshake
   [e]
   (println "Adding root")
-  (om/add-root! reconciler
-                  HelloWorld (gdom/getElement "app")))
+  (om/add-root! reconciler Xom (gdom/getElement "app")))
 
+; for figwheel
 (when (:open? @chsk-state)
-  (om/add-root! reconciler
-                HelloWorld (gdom/getElement "app"))) 
+  (om/add-root! reconciler Xom (gdom/getElement "app")))
 
 (defmethod handle-ws :chsk/recv
   [{:keys [event] :as e}]

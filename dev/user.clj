@@ -22,7 +22,8 @@
   (reset! server (http/start-server #'server/my-app
                      {:port 3000}))
   (when (d/create-database "datomic:mem://xom")
-    (d/transact (xom.server/conn) xom.server/schema)))
+    @(d/transact (server/conn) server/schema)
+    @(d/transact (server/conn) [(server/create-game)])))
 
 (defn stop
   []
@@ -101,10 +102,7 @@
 
 (defn console-game
   [player-name player]
-  (loop [g (if (= :x player)
-             (server/create-game player-name "computer")
-             (server/create-game "computer" player-name))
-         msg nil]
+  (loop [g (server/create-game)]
     (let [b (server/board g)
           winner (server/winner b)
           turn (server/player-turn g)]

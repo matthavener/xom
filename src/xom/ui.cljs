@@ -42,6 +42,11 @@
     (let [{:xom/keys [winner positions]} (om/props this)
           indexed (group-by (juxt :pos/row :pos/col) positions)]
       (dom/div nil
+               (when (not= winner :none)
+                 (dom/div nil (str winner " wins!")
+                 (dom/button
+                   #js {:onClick #(om/transact! this [(list 'xom/new-game {}) :xom/game])}
+                   "click for new game")))
                (mapv
                  (fn [row]
                    (dom/div
@@ -64,13 +69,9 @@
   (render [this]
     (let [{:xom/keys [my-uid game]} (om/props this)]
       (dom/div nil
-               (dom/div nil (str "me: " my-uid))
-               (dom/pre nil (with-out-str (pprint game)))
-               (if game
+               (dom/div nil (str "playing as: " my-uid))
+               (when game
                  (game-render game)
-                 (dom/div
-                   #js {:onClick #(om/transact! this [(list 'xom/new-game {}) :xom/game])}
-                   "click for new game")
                  )
                ))))
 

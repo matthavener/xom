@@ -153,13 +153,10 @@
 
 (defmethod om-mutate 'xom/new-game
   [{:keys [conn uid send-fn connected-uids]} k p]
-  (log "xom/mark " p uid)
-  {:action
-   (fn []
-     (try
-       @(d/transact conn [(create-game)])
-       nil
-       (catch Exception e (log e))))})
+  (log "xom/new-game " p uid)
+  {:action (fn []
+             @(d/transact conn [(create-game)])
+             nil)})
 
 (defmethod om-mutate 'xom/mark
   [{:keys [conn uid send-fn connected-uids]} k p]
@@ -167,12 +164,12 @@
   {:action
    (fn []
      (try
-       (if-let [tx (move (d/db conn) (assoc p :pos/mark (keyword uid)))]
+       (if-let [tx (move (d/db conn) (assoc p :pos/mark uid))]
          (let [{:keys [db-after]} @(d/transact conn tx)]
            (doseq [uid (:ws @connected-uids)]
-             (send-fn uid [:xom/data {[:db/id (:db/id p)]
-                                      (into {} (d/touch (d/entity db-after (:db/id p))))
-                                      }]))))
+             (send-fn uid
+                      [:xom/data
+                       (into {} (map (fn [m] [[:db/id (:db/id m)] m])) tx)]))))
        (catch Exception e (log e))))})
 
 (defmethod om-mutate :default
@@ -195,11 +192,11 @@
                           (log "user-id-fn " (count uids) uids)
                           (cond
                             (empty? uids)
-                            "x"
-                            (uids "o")
-                            "x"
-                            (uids "x")
-                            "o"
+                            :x
+                            (uids :o)
+                            :x
+                            (uids :x)
+                            :o
                             :else
                             nil)))})]
 

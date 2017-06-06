@@ -106,9 +106,9 @@
       (let [new-winner (-> (d/with db [new-pos])
                            :db-after
                            (d/entity (:db/id g))
-                           :xom/positions
                            board
                            winner)]
+        (log "new-winner " new-winner)
         [{:db/id (:db/id g) :xom/winner new-winner}
          new-pos])
       (log "illegal move " new-pos))))

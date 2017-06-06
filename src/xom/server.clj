@@ -47,7 +47,7 @@
 (defn player-turn
   "Return whose turn it is (x goes first)."
   [game]
-  (let [turns (count (:xom/positions game))]
+  (let [turns (count (keep :pos/mark (:xom/positions game)))]
     (if (even? turns)
       :x
       :o)))
@@ -80,12 +80,16 @@
 
 (defn valid-move?
   [game {:keys [pos/row pos/col pos/mark]}]
+  (log "valid-move? " row col (player-turn game) mark)
   (and game
        (= mark (player-turn game))
        (< row 3)
        (< col 3)
-       (empty? (filter #(and (= row (:pos/row %))
-                             (= col (:pos/col %))) (:xom/positions game)))))
+       (empty? (filter #(and
+                          (:pos/mark %)
+                          (= row (:pos/row %))
+                          (= col (:pos/col %)))
+                       (:xom/positions game)))))
 
 (defn game
   "return the game entity for the game id or nil if the game does not exist"
@@ -94,12 +98,20 @@
 
 (defn move
   "Return a transaction to apply this move or nil if the move is invalid"
-  [db [game-id row col mark]]
-  (let [g (game db game-id)
-        m {:pos/row row :pos/col col :pos/mark mark}]
-    (if (valid-move? g m)
-      [{:xom/game-id game-id
-        :xom/positions [m]}])))
+  [db new-pos]
+  (let [m (d/entity db (:db/id new-pos))
+        g (:xom/_positions m) ]
+    (log "move " m g new-pos)
+    (if (and m g (valid-move? g new-pos))
+      (let [new-winner (-> (d/with db [new-pos])
+                           :db-after
+                           (d/entity (:db/id g))
+                           :xom/positions
+                           board
+                           winner)]
+        [{:db/id (:db/id g) :xom/winner new-winner}
+         new-pos])
+      (log "illegal move " new-pos))))
 
 (comment
  (even? 0)
@@ -139,16 +151,28 @@
     (log "got game" game)
     {:value game}))
 
+(defmethod om-mutate 'xom/new-game
+  [{:keys [conn uid send-fn connected-uids]} k p]
+  (log "xom/mark " p uid)
+  {:action
+   (fn []
+     (try
+       @(d/transact conn [(create-game)])
+       nil
+       (catch Exception e (log e))))})
+
 (defmethod om-mutate 'xom/mark
   [{:keys [conn uid send-fn connected-uids]} k p]
   (log "xom/mark " p uid)
   {:action
    (fn []
      (try
-       (let [{:keys [db-after]} @(d/transact conn [(assoc p :pos/mark (keyword uid))])]
-         (doseq [uid (:ws @connected-uids)]
-           (send-fn uid [:xom/data {[:db/id (:db/id p)]
-                                    (into {} (d/touch (d/entity db-after (:db/id p))))}])))
+       (if-let [tx (move (d/db conn) (assoc p :pos/mark (keyword uid)))]
+         (let [{:keys [db-after]} @(d/transact conn tx)]
+           (doseq [uid (:ws @connected-uids)]
+             (send-fn uid [:xom/data {[:db/id (:db/id p)]
+                                      (into {} (d/touch (d/entity db-after (:db/id p))))
+                                      }]))))
        (catch Exception e (log e))))})
 
 (defmethod om-mutate :default
@@ -172,10 +196,10 @@
                           (cond
                             (empty? uids)
                             "x"
-                            (uids "y")
+                            (uids "o")
                             "x"
                             (uids "x")
-                            "y"
+                            "o"
                             :else
                             nil)))})]
 
@@ -187,8 +211,6 @@
 (comment
   (deref connected-uids)
   )
-
-(remove-all-methods event-msg-handler)
 
 (defmethod event-msg-handler :xom/query
   [{:keys [?reply-fn ?data ring-req] :as e}]

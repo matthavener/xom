@@ -22,8 +22,7 @@
       (println mark)
       (dom/span
         #js {:style #js {:fontSize "32pt"}
-             :onClick (fn [_]
-                        (om/transact! this [(list 'xom/mark p)]))}
+             :onClick #(om/transact! this [(list 'xom/mark p)])}
         (name (or mark :e))))))
 
 (def pos-render (om/factory Pos {:keyfn :pos/col}))
@@ -67,8 +66,12 @@
       (dom/div nil
                (dom/div nil (str "me: " my-uid))
                (dom/pre nil (with-out-str (pprint game)))
-               (when game
-                 (game-render game))
+               (if game
+                 (game-render game)
+                 (dom/div
+                   #js {:onClick #(om/transact! this [(list 'xom/new-game {}) :xom/game])}
+                   "click for new game")
+                 )
                ))))
 
 (defmulti read (fn [env key params] key))

@@ -102,7 +102,7 @@
 
 (defn console-game
   [player-name player]
-  (loop [g (server/create-game)]
+  (loop [g (server/create-game) msg nil]
     (let [b (server/board g)
           winner (server/winner b)
           turn (server/player-turn g)]

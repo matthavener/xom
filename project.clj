@@ -19,5 +19,7 @@
                  [figwheel-sidecar "0.5.8"]]
 
   :source-paths ["src"]
-  :profiles {:dev {:source-paths ["dev" "src" "test"]}}
-  )
+  :profiles {:dev {:source-paths ["dev" "src" "test"]
+                   :dependencies [[com.cemerick/piggieback "0.2.2"]
+                                  [org.clojure/tools.nrepl "0.2.10"]]
+                   :repl-options {:nrepl-middleware [cemerick.piggieback/wrap-cljs-repl]}}})

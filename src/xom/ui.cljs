@@ -133,10 +133,16 @@
 (defmethod handle-ws :chsk/recv
   [{:keys [event] :as e}]
   (println "received async " event)
-  (om/merge! reconciler (second (second event))))
+  (let [m (second (second event))]
+    (om/merge! reconciler m)))
 
 (defmethod handle-ws :default
   [e]
-  (println (select-keys e [:id :event]))
+  (println (select-keys e [:id :event])))
+
+(comment
+  (pprint (deref reconciler))
+  (pprint (om/db->tree (om/get-query Xom) (deref reconciler) (deref reconciler)))
+  (om/merge! reconciler {})
   )
 

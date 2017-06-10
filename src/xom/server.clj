@@ -189,7 +189,7 @@
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
        (sente/make-channel-socket!
          (get-sch-adapter)
-         {:user-id-fn uid-fn})]
+         {:user-id-fn #'uid-fn})]
 
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)

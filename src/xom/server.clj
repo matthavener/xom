@@ -6,6 +6,7 @@
     [ring.middleware.resource]
     [ring.middleware.keyword-params]
     [ring.middleware.params]
+    [ring.middleware.session]
     [datomic.api :as d]
     [om.next.server :as om]))
 
@@ -16,10 +17,20 @@
 
 (def schema
   "The database schema for the game. Positions of :x and :o are recorded flatten"
-  [{:db/ident :xom/game-id
+  [{:db/ident :player/id
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :xom/game-id
     :db/valueType :db.type/uuid
     :db/cardinality :db.cardinality/one
     :db/unique :db.unique/identity}
+   {:db/ident :xom/player-x
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one}
+   {:db/ident :xom/player-o
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one}
    {:db/ident :xom/winner
     :db/valueType :db.type/keyword
     :db/cardinality :db.cardinality/one}
@@ -38,14 +49,26 @@
     :db/cardinality :db.cardinality/one} ; :x or :o
    ])
 
+(defn broadcast-state
+  "send some state to all connected clients"
+  [{:keys [send-fn connected-uids]} data]
+  (doseq [uid (:ws @connected-uids)]
+    (send-fn uid [:xom/data data])))
+
 (defn create-game
   "Create a new game"
-  []
-  {:xom/game-id (java.util.UUID/randomUUID)
-   :xom/winner :none
-   :xom/positions (for [col (range 0 3)
-                        row (range 0 3)]
-                    {:pos/col col :pos/row row})})
+  [player-x player-o]
+  (cond->
+    {:xom/game-id (java.util.UUID/randomUUID)
+     :xom/winner :none
+     :xom/positions (for [col (range 0 3)
+                          row (range 0 3)]
+                      {:pos/col col :pos/row row})}
+    player-x
+    (assoc :xom/player-x [:player/id player-x])
+
+    player-o
+    (assoc :xom/player-o [:player/id player-o])))
 
 (defn player-turn
   "Return whose turn it is (x goes first)."
@@ -54,6 +77,15 @@
     (if (even? turns)
       :x
       :o)))
+
+(defn player-mark
+  [game uid]
+  (cond
+   (= uid (-> game :xom/player-x :player/id))
+   :x
+
+   (= uid (-> game :xom/player-o :player/id))
+   :o))
 
 (defn board
   "Return a 2d vector representing the board"
@@ -96,9 +128,11 @@
 
 (defn move
   "Return a transaction to apply this move or nil if the move is invalid"
-  [db new-pos]
+  [db new-pos user]
   (let [m (d/entity db (:db/id new-pos))
-        g (:xom/_positions m) ]
+        g (:xom/_positions m)
+        mark (player-mark g user)
+        new-pos (assoc new-pos :pos/mark mark)]
     (log "move " m g new-pos)
     (if (and m g (valid-move? g new-pos))
       (let [new-winner (-> (d/with db [new-pos])
@@ -111,8 +145,35 @@
          new-pos])
       (log "illegal move " new-pos))))
 
+(defn player
+  "lookup player"
+  [db id]
+  (d/entity db [:player/id id]))
+
+(defn ensure-player
+  "Ensure the player with id exists, return the player entity"
+  [conn id]
+  (if-let [p (d/entity (d/db conn) [:player/id id])]
+    p
+    (let [{:keys [db-after]} (d/transact conn [{:player/id id}])]
+      (d/entity db-after [:player/id id]))))
+
+(defn active-games
+  [db query]
+  (d/q '[:find (pull ?g query)
+         :in $ query
+         :where
+         [?g :xom/game-id]
+         [?g :xom/winner :none]] db query))
+
 (comment
- (player-turn (create-game))
+ (active-games (d/db (conn)) '[*])
+
+ (d/q '[:find (pull ?g [:xom/game-id :xom/winner {:xom/positions [:pos/row :pos/col :pos/mark]}])
+        :where
+        [?g :xom/game-id]] (d/db (conn)))
+
+ (player-turn (create-game "x" "o"))
 
  (valid-move? (create-game) {:pos/row 0 :pos/col 0 :pos/mark :o})
  (valid-move? (create-game) {:pos/row 0 :pos/col 0 :pos/mark :x})
@@ -136,37 +197,86 @@
   [{:keys [uid] :as e} k p]
   {:value uid})
 
-(defmethod om-read :xom/game
-  [{:keys [conn db query]} k p]
-  (let [game (d/q '[:find (pull ?e query) .
-                    :in $ query
-                    :where
-                    [?e :xom/game-id]
-                    [?e :xom/winner :none]]
-                  (or db (d/db conn))
-                  (or query ['* {:xom/positions ['*]}]))]
-    {:value game}))
+(defmethod om-read :xom/active-games
+  [{:keys [conn query]} k p]
+  (let [games (d/q '[:find [(pull ?g query) ...]
+                     :in $ query
+                     :where
+                     [?g :xom/game-id]
+                     [?g :xom/player-x]
+                     [?g :xom/player-o]
+                     [?g :xom/winner :none]] (d/db conn) query)]
+    {:value (into [] games)}))
 
+(defmethod om-read :xom/my-games
+  [{:keys [conn query uid]} k p]
+  (log ":xom/my-games: " uid)
+  (let [games (d/q '[:find [(pull ?g query) ...]
+                     :in $ ?uid query
+                     :where
+                     [?p :player/id ?uid]
+                     [?g :xom/game-id]
+                     (or [?g :xom/player-x ?p]
+                         [?g :xom/player-o ?p])] (d/db conn) uid query)]
+    (log "found games: " games)
+    {:value (into [] games)}))
+
+(defmethod om-read :xom/waiting-games
+  [{:keys [conn query uid]} k p]
+  (log ":xom/waiting-games: " uid)
+  (let [games (d/q '[:find [(pull ?g query) ...]
+                     :in $ ?uid query
+                     :where
+                     [?p :player/id ?uid]
+                     [?g :xom/game-id]
+                     [?g :xom/player-x]
+                     (not [?g :xom/player-o])
+                     (not [?g :xom/player-x ?p])] (d/db conn) uid query)]
+    {:value (into [] games)}))
+
+(defn pull-game
+  [db ref]
+  (d/pull db
+          [:db/id
+           :xom/game-id
+           {:xom/player-x [:db/id :player/id]}
+           {:xom/player-o [:db/id :player/id]}
+           {:xom/positions [:db/id :pos/row :pos/col :pos/mark]}
+           :xom/winner]
+          ref))
+
+;; this is unused now
 (defmethod om-mutate 'xom/new-game
-  [{:keys [conn uid send-fn connected-uids parser] :as env} k p]
+  [{:keys [conn uid parser] :as env} k p]
   (log "xom/new-game " p uid)
   {:action (fn []
-             (let [{:keys [db-after]} @(d/transact conn [(create-game)])]
-               (doseq [uid (:ws @connected-uids)]
-                 (send-fn uid [:xom/data
-                               (parser (assoc env :db db-after) [:xom/game])]))))})
+             (let [{:keys [db-after]} @(d/transact conn [(create-game nil nil)])]
+               (broadcast-state env (parser (assoc env :db db-after) [:xom/game]))))})
+
+(defmethod om-mutate 'xom/begin-game
+  [{:keys [conn uid] :as env} k p]
+  {:action (fn []
+             (let [g (create-game uid nil)
+                   {:keys [db-after]} @(d/transact conn [g])
+                   game (pull-game db-after [:xom/game-id (:xom/game-id g)])]
+               (broadcast-state env [(list 'server/add-new-game game)])))})
+
+(defmethod om-mutate 'xom/join-game
+  [{:keys [conn uid] :as env} k {game-id :game/dbid}]
+  {:action (fn []
+             (let [db (d/db conn)
+                   pid (:db/id (d/entity db [:player/id uid]))
+                   {:keys [db-after]} @(d/transact conn [{:db/id game-id :xom/player-o pid}])]
+               (broadcast-state env [(list 'server/game-joined {:game/dbid game-id :player {:db/id pid :player/id uid}})])))})
 
 (defmethod om-mutate 'xom/mark
-  [{:keys [conn uid send-fn connected-uids]} k p]
+  [{:keys [conn uid] :as env} k p]
   (log "xom/mark " p uid)
   {:action
    (fn []
-     (if-let [tx (move (d/db conn) (assoc p :pos/mark uid))]
+     (if-let [tx (move (d/db conn) p uid)]
        (let [{:keys [db-after]} @(d/transact conn tx)]
-         (doseq [uid (:ws @connected-uids)]
-           (send-fn
-             uid
-             [:xom/data (into {} (map (fn [m] [[:db/id (:db/id m)] m])) tx)])))))})
+         (broadcast-state env (into {} (map (fn [m] [[:db/id (:db/id m)] m])) tx)))))})
 
 (defmethod om-mutate :default
   [e k p]
@@ -177,35 +287,44 @@
 (defn conn [] (d/connect "datomic:mem://xom"))
 
 (comment
-  (d/q '[:find ?e :where [?e :db/type]] (d/db (conn))))
+
+ (let [db-after (d/db (conn))
+       game-id (:db/id (d/entity db-after [:xom/game-id #uuid "ec49ab8b-a3a2-4ac6-b1a6-0eaaa0ba0d9c"]))
+       env {:connected-uids connected-uids :send-fn send-fn}]
+   {[:db/id game-id] (pull-game db-after game-id)}
+   #_(broadcast-state env {[:db/id game-id] (pull-game db-after game-id)}))
+
+ (d/q '[:find ?e :where [?e :db/type ]] (d/db (conn)))
+
+ (d/q '[:find (pull ?g [:xom/game-id {:xom/player-x [:player/id]}  {:xom/player-o [:player/id]} :xom/winner]) :where [?g :xom/game-id ]] (d/db (conn)))
+
+ (om-parser {:conn (conn)} [{:xom/active-games [:xom/game-id {:xom/player-x [:player/id]} {:xom/player-o [:player/id]}]}])
+ (d/q '[:find [(pull ?g query) ...]
+        :in $ ?uid query
+        :where
+        [?p :player/id ?uid]
+        [?g :xom/game-id]
+        [?g :xom/player-x]
+        (not [?g :xom/player-o])
+        (not [?g :xom/player-x ?p]) ] (d/db (conn)) "bob" '[*])
+
+ (d/q '[:find ?id
+        :where [_ :player/id ?id]] (d/db (conn)))
+ )
 
 (defmulti event-msg-handler :id)
 
-(declare uid-fn)
-
 (let [{:keys [ch-recv send-fn connected-uids
-              ajax-post-fn ajax-get-or-ws-handshake-fn]}
+              ajax-post-fn ajax-get-or-ws-handshake-fn] sfn :send-fn}
        (sente/make-channel-socket!
-         (get-sch-adapter)
-         {:user-id-fn #'uid-fn})]
+         (get-sch-adapter))]
 
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
-  (def connected-uids                connected-uids))
-
-(defn uid-fn [_]
-  (let [uids (:ws @connected-uids)]
-    (log "user-id-fn " (count uids) uids)
-    (cond
-     (empty? uids)
-     :x
-     (uids :o)
-     :x
-     (uids :x)
-     :o
-     :else
-     nil)))
+  (def connected-uids                connected-uids)
+  (def send-fn sfn)
+  )
 
 (comment
   (deref connected-uids))
@@ -237,18 +356,29 @@
          <script src=\"/js/compiled/xom.js\"></script></body></html>"})
 
 (defroutes my-app-routes
-  (GET "/" req (render-index))
+  (GET "/" req
+    (log "index session: " (:session req))
+    (render-index))
   (GET  "/chsk" req (ring-ajax-get-or-ws-handshake req))
-  (POST "/chsk" req (ring-ajax-post req)))
+  (POST "/chsk" req (ring-ajax-post req))
+  (POST "/login" [user-id :as req]
+        (let [{:keys [session conn]} req
+              player (ensure-player conn user-id)]
+          (log "conn: " conn)
+          (log "session: " session " userid: " user-id " player: " (d/touch player))
+          {:status 200
+           :body user-id
+           :session (assoc session :uid user-id)})))
 
 (defn wrap-datomic
   [handler]
   (fn [request]
     (handler (assoc request :conn (conn)))))
 
-(def my-app
-  (-> my-app-routes
+(defonce my-app
+  (-> #'my-app-routes
       ring.middleware.keyword-params/wrap-keyword-params
       ring.middleware.params/wrap-params
+      ring.middleware.session/wrap-session
       wrap-datomic
       (ring.middleware.resource/wrap-resource "public")))

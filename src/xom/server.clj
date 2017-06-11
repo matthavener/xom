@@ -314,31 +314,15 @@
 
 (defmulti event-msg-handler :id)
 
-(declare uid-fn)
-
 (let [{:keys [ch-recv send-fn connected-uids
               ajax-post-fn ajax-get-or-ws-handshake-fn]}
        (sente/make-channel-socket!
-         (get-sch-adapter)
-         {#_#_:user-id-fn #'uid-fn})]
+         (get-sch-adapter))]
 
   (def ring-ajax-post                ajax-post-fn)
   (def ring-ajax-get-or-ws-handshake ajax-get-or-ws-handshake-fn)
   (def ch-chsk                       ch-recv) ; ChannelSocket's receive channel
   (def connected-uids                connected-uids))
-
-(defn uid-fn [_]
-  (let [uids (:ws @connected-uids)]
-    (log "user-id-fn " (count uids) uids)
-    (cond
-     (empty? uids)
-     :x
-     (uids :o)
-     :x
-     (uids :x)
-     :o
-     :else
-     nil)))
 
 (comment
   (deref connected-uids))

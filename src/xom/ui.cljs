@@ -208,7 +208,7 @@
 ; queries or re-run them
 (defmethod handle-ws :chsk/handshake
   [e]
-  (println "Adding root: " (select-keys @chsk-state [:id :event]))
+  (println "Adding root")
   (om/add-root! reconciler Xom (gdom/getElement "app")))
 
 ; for figwheel
@@ -230,7 +230,3 @@
   (pprint (om/db->tree (om/get-query Xom) (deref reconciler) (deref reconciler)))
   (om/merge! reconciler {})
   )
-
-(comment
- (deref reconciler)
- )

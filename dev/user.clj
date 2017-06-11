@@ -22,8 +22,7 @@
   (reset! server (http/start-server #'server/my-app
                      {:port 3000}))
   (when (d/create-database "datomic:mem://xom")
-    @(d/transact (server/conn) server/schema)
-    @(d/transact (server/conn) [(server/create-game)])))
+    @(d/transact (server/conn) server/schema)))
 
 (defn stop
   []

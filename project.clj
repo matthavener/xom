@@ -16,6 +16,7 @@
                  [com.datomic/datomic-free "0.9.5561"]
                  [org.omcljs/om "1.0.0-alpha48"]
                  [ring "1.5.0"]
+                 [sablono "0.8.0"]
                  [figwheel-sidecar "0.5.8"]]
 
   :source-paths ["src"]

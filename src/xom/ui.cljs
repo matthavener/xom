@@ -3,10 +3,34 @@
     [taoensso.sente :as sente]
     [goog.dom :as gdom]
     [om.next :as om :refer-macros [defui]]
+    [sablono.core :refer-macros [html]]
     [om.dom :as dom]
-    [clojure.pprint :refer [pprint]]))
+    [clojure.pprint :refer [pprint]]
+    [clojure.string :as str]
+    ))
 
 (enable-console-print!)
+
+(def mark-style {:width "100px"
+                 :height "100px"
+                 :display "flex"
+                 :align-items "center"
+                 :border "1px solid gray"
+                 :justify-content "center"})
+
+(def pos-style {:font-size "32pt"
+                :cursor "pointer"})
+
+(def flex {:display "flex"
+           :justify-content "center"
+           :align-items "center"})
+
+(def xom-style {:display "flex"
+                :flex-direction "column"
+                :align-items "center"
+                :justify-content "center"
+                :width "100%"})
+
 
 (defui ^:once Pos
   static om/Ident
@@ -16,14 +40,16 @@
   (query [this]
     [:db/id :pos/row :pos/col :pos/mark])
   Object
-  (render
-    [this]
-    (let [{:pos/keys [mark] :as p} (om/props this)]
+  (render [this]
+    (let [{:pos/keys [mark] :as p} (om/props this)
+          is-empty? (nil? mark)]
       (println mark)
-      (dom/span
-        #js {:style #js {:fontSize "32pt"}
-             :onClick #(om/transact! this [(list 'xom/mark p)])}
-        (name (or mark :e))))))
+      (html
+        [:div {:style pos-style
+               :on-click #(om/transact! this [(list 'xom/mark p)])}
+         [:div {:style mark-style}
+          (when-not is-empty? (-> mark name str/capitalize))]]
+        ))))
 
 (def pos-render (om/factory Pos {:keyfn :pos/col}))
 
@@ -37,28 +63,29 @@
      {:xom/positions (om/get-query Pos)}
      :xom/winner])
   Object
-  (render
-    [this]
+  (render [this]
     (let [{:xom/keys [winner positions]} (om/props this)
           indexed (group-by (juxt :pos/row :pos/col) positions)]
-      (dom/div nil
-               (when (not= winner :none)
-                 (dom/div nil (str winner " wins!")
-                 (dom/button
-                   #js {:onClick #(om/transact! this [(list 'xom/new-game {}) :xom/game])}
-                   "click for new game")))
-               (mapv
-                 (fn [row]
-                   (dom/div
-                     #js {:key row}
-                     (mapv
-                       (fn [col]
-                         (let [pos (first (indexed [row col]))]
-                           (pos-render pos)))
-                       (range 0 3))))
-                 (range 0 3))))))
+      (html
+        [:div
+         (when (not= winner :none)
+           [:div {:style (merge flex {:justify-content "space-between"})}
+            [:h2 (str (-> winner name str/capitalize) " wins!")]
+            [:button {:style {:font-size "12pt"
+                              :padding "1rem 0.5rem"}
+                      :on-click #(om/transact! this [(list 'xom/new-game {}) :xom/game])}
+             "click for new game"]])
+                 (mapv
+                   (fn [row]
+                     [:div {:key row :style flex}
+                      (mapv (fn [col]
+                              (let [pos (first (indexed [row col]))]
+                                (pos-render pos)))
+                            (range 0 3))])
+                   (range 0 3))]))))
 
 (def game-render (om/factory Game))
+
 
 (defui ^:once Xom
   static om/IQuery
@@ -68,12 +95,11 @@
   Object
   (render [this]
     (let [{:xom/keys [my-uid game]} (om/props this)]
-      (dom/div nil
-               (dom/div nil (str "playing as: " my-uid))
-               (when game
-                 (game-render game)
-                 )
-               ))))
+      (html
+        [:div {:style xom-style}
+         [:h1 (str "Playing as " (str/capitalize (name my-uid)))]
+         (when game
+           (game-render game))]))))
 
 (defmulti read (fn [env key params] key))
 
